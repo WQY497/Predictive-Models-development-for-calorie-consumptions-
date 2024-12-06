@@ -1,0 +1,366 @@
+---
+title: "Predictive Models Developments For Calorie Consumption"
+author: " Qiyang Wang, Andrew Cao, Yiru Fang, Dichuan Zheng"
+
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    latex_engine: xelatex
+    df_print: paged
+    toc: true
+    toc_depth: 2
+extra_dependencies:
+  - fontspec
+  - xcolor
+---
+
+```{r}
+gym_data <- read.csv("gym_data.csv")
+
+# Display the first few rows of the data
+head(gym_data)
+
+# Check the structure of the dataset
+str(gym_data)
+
+# Provide summary statistics of the dataset
+summary(gym_data)
+```
+
+```{r}
+library(ggplot2)
+
+ggplot(gym_data, aes(x = Calories_Burned)) +
+  geom_histogram(binwidth = 50, fill = "blue", color = "black") +
+  labs(title = "Distribution of Calories Burned", x = "Calories Burned", y = "Count")
+numeric_vars <- gym_data[, sapply(gym_data, is.numeric)]
+correlations <- cor(numeric_vars, use = "complete.obs")
+correlations["Calories_Burned", ]
+```
+
+```{r}
+# devide the dataset to training and testing
+set.seed(123)
+train_index <- sample(1:nrow(gym_data), 0.7 * nrow(gym_data))
+train_data <- gym_data[train_index, ]
+test_data <- gym_data[-train_index, ]
+# Fit a full model
+full_model <- lm(Calories_Burned ~ ., data = train_data)
+summary(full_model)
+#if when we have a large number of predictors, according to the summary, we can see that some predictors are not significant, we can use the stepwise selection to select the best model.Base on BIC
+
+# Null model with only the intercept
+null_model <- lm(Calories_Burned ~ 1, data = train_data)
+
+# Stepwise selection both directiona
+# Number of observations
+n <- nrow(train_data)
+
+# Stepwise selection based on BIC
+stepwise_model_bic <- step(null_model,scope = list(lower = null_model, upper = full_model), direction = "both", k = log(n))  # Use BIC criterion
+
+summary(stepwise_model_bic)
+
+stepwise_model_aic <- step(null_model,scope = list(lower = null_model, upper = full_model), direction = "both", k = 2)  # Use AIC criterion
+
+summary(stepwise_model_aic)
+
+```
+
+```{r}
+# Extract the coefficients from the final model
+final_model1 <- stepwise_model_bic
+final_model_coefficients <- coef(final_model1)
+final_model_coefficients
+```
+
+
+```{r}
+
+# Extract the coefficients from the final model
+final_model2 <- stepwise_model_aic
+final_model_coefficients <- coef(final_model2)
+final_model_coefficients
+```
+
+```{r}
+
+# Calculate AIC and BIC for the final model
+aic_value1 <- AIC(stepwise_model_bic)
+bic_value1 <- BIC(stepwise_model_bic)
+aic_value2 <- AIC(stepwise_model_aic)
+bic_value2 <- BIC(stepwise_model_aic)
+
+cat("The AIC of stepwise_model_bic:", aic_value1, "\n")
+cat("The BIC of stepwise_model_bic:", bic_value1, "\n")
+cat("The AIC of stepwise_model_aic:", aic_value2, "\n")
+cat("The BIC of stepwise_model_aic:", bic_value2, "\n")
+
+ 
+```
+
+```{r}
+
+# Extract the coefficients from the final model
+final_model <- stepwise_model_aic
+final_model_coefficients <- coef(final_model)
+final_model_coefficients
+# Diagnostic plots
+par(mfrow = c(2, 2))
+plot(final_model)
+
+
+```
+
+```{r}
+
+# Log transformation of the response
+log_model <- lm(Calories_Burned ~ Session_Duration..hours. + log(Avg_BPM) +
+                  Gender + Age + log(Resting_BPM), data = train_data)
+summary(log_model)
+par(mfrow = c(2, 2))
+plot(log_model)
+```
+
+```{r}
+
+# Square root transformation of response
+sqrt_model <- lm(sqrt(Calories_Burned) ~ Session_Duration..hours. + Avg_BPM +
+                   Gender + Age + Resting_BPM, data = train_data)
+summary(sqrt_model)
+par(mfrow = c(2, 2))
+plot(sqrt_model)
+```
+
+```{r}
+
+# Add quadratic terms to the model
+poly_model1 <- lm(Calories_Burned ~ Session_Duration..hours. + I(Session_Duration..hours.^2) +
+                   Avg_BPM + Gender + Age + Resting_BPM, data = train_data)
+summary(poly_model1)
+par(mfrow = c(2, 2))
+plot(poly_model1)
+poly_model2 <- lm(sqrt(Calories_Burned) ~poly(Session_Duration..hours., 2) + 
+                   poly(Avg_BPM, 2) + Gender + Age + Resting_BPM, data = train_data)
+summary(poly_model2)
+par(mfrow = c(2, 2))
+plot(poly_model2)
+
+
+```
+
+```{r}
+
+# 设置多个图在一页的布局（2行2列）
+par(mfrow = c(2, 2))
+
+# Cook's distance for identifying influential points
+# Calculate Cook's Distance
+influence_measures <- cooks.distance(poly_model2)
+
+# Threshold for identifying influential points
+threshold <- 4 / nrow(train_data)
+
+# Identify influential points
+influential_points <- which(influence_measures > threshold)
+
+# Calculate hat values
+hat_values <- hatvalues(poly_model2)
+
+# Threshold for high leverage points
+leverage_threshold <- 2 * (length(coef(poly_model2)) / nrow(train_data))
+
+# Identify high leverage points
+high_leverage_points <- which(hat_values > leverage_threshold)
+
+# Output influential points and high leverage points as a table
+output_table <- data.frame(
+  Type = c(rep("Influential Points", length(influential_points)),
+           rep("High Leverage Points", length(high_leverage_points))),
+  Index = c(influential_points, high_leverage_points)
+)
+
+# Display as a table
+knitr::kable(output_table, caption = "Summary of Influential and High Leverage Points")
+
+# Plot 1: Cook's Distance
+plot(influence_measures, type = "h", main = "Cook's Distance", 
+     xlab = "Index", ylab = "Cook's Distance", col = "blue", pch = 19)
+abline(h = threshold, col = "red", lty = 2)  # Add threshold line
+text(which(influence_measures > threshold), 
+     influence_measures[influence_measures > threshold], 
+     labels = which(influence_measures > threshold), 
+     pos = 4, col = "darkred")
+
+# Plot 2: Hat Values
+plot(hat_values, type = "h", main = "Leverage Values", 
+     xlab = "Index", ylab = "Hat Values", col = "blue", pch = 19)
+abline(h = leverage_threshold, col = "red", lty = 2)  # Add threshold line
+text(which(hat_values > leverage_threshold), 
+     hat_values[hat_values > leverage_threshold], 
+     labels = which(hat_values > leverage_threshold), 
+     pos = 4, col = "darkgreen")
+
+# Plot 3: Scatter plot of Cook's Distance vs Hat Values
+plot(hat_values, influence_measures, 
+     xlab = "Hat Values", ylab = "Cook's Distance", 
+     main = "Cook's Distance vs Leverage", 
+     col = "blue", pch = 19)
+abline(h = threshold, col = "red", lty = 2)  # Cook's Distance threshold
+abline(v = leverage_threshold, col = "red", lty = 2)  # Leverage threshold
+
+# Highlight combined points
+points(hat_values[influential_points], 
+       influence_measures[influential_points], 
+       col = "darkred", pch = 19)
+points(hat_values[high_leverage_points], 
+       influence_measures[high_leverage_points], 
+       col = "darkgreen", pch = 19)
+
+legend("topright", legend = c("Influential", "High Leverage"), 
+       col = c("darkred", "darkgreen"), pch = 19)
+
+# Reset plotting layout to default
+par(mfrow = c(1, 1))
+
+```
+
+```{r}
+
+# Remove only influential points
+train_data_clean <- train_data[-influential_points, ]
+ploy_model_clean <- lm(sqrt(Calories_Burned) ~poly(Session_Duration..hours., 2) + 
+                   poly(Avg_BPM, 2) + Gender + Age + Resting_BPM, data = train_data_clean)
+summary(ploy_model_clean)
+par(mfrow = c(2, 2))
+plot(ploy_model_clean)
+
+```
+
+```{r}
+
+# Predictions on the training set
+train_predictions <- predict(ploy_model_clean, newdata = train_data_clean)
+
+# Mean Squared Error for the training set
+train_mse <- mean((sqrt(train_data_clean$Calories_Burned) - train_predictions)^2)
+
+# Predictions on the test set
+test_predictions <- predict(ploy_model_clean, newdata = test_data)
+
+# Mean Squared Error for the test set
+test_mse <- mean((sqrt(test_data$Calories_Burned) - test_predictions)^2)
+
+# Print the results
+cat("Training MSE:", train_mse, "\n")
+cat("Test MSE:", test_mse, "\n")
+```
+
+```{r}
+library(car)
+vif(full_model)
+# Select only numeric columns from the training dataset
+numeric_cols <- train_data_clean[, sapply(train_data_clean, is.numeric)]
+
+# Calculate the correlation matrix
+correlation_matrix <- cor(numeric_cols, use = "complete.obs")
+
+# Print the correlation matrix
+#print(correlation_matrix)
+
+```
+
+```{r}
+vif(ploy_model_clean)
+```
+
+```{r}
+# Load required libraries
+library(glmnet)
+library(dplyr)
+
+# Step 1: Normalize numeric variables
+numeric_cols <- sapply(train_data, is.numeric)
+train_data[numeric_cols] <- scale(train_data[numeric_cols])
+
+# Step 2: Handle categorical variables with dummy encoding
+# Create a design matrix excluding the response variable
+x_train <- model.matrix(~ . - Calories_Burned, data = train_data)[, -1]
+
+# Prepare the response variable
+y_train <- train_data$Calories_Burned
+
+# Create the design matrix for the test dataset using the same formula
+x_test <- model.matrix(~ . - Calories_Burned, data = test_data)[, -1]
+
+# Ensure response variable is extracted correctly
+y_test <- test_data$Calories_Burned
+# Step 3: Fit LASSO, Ridge, and Elastic Net models
+# Fit LASSO regression model (alpha = 1)
+lasso_model <- cv.glmnet(x_train, y_train, alpha = 1, nfolds = 10)
+
+# Fit Ridge regression model (alpha = 0)
+ridge_model <- cv.glmnet(x_train, y_train, alpha = 0, nfolds = 10)
+
+# Fit Elastic Net regression model (alpha = 0.5)
+elastic_net_model <- cv.glmnet(x_train, y_train, alpha = 0.5, nfolds = 10)
+
+# Extract optimal lambda values
+lasso_lambda <- lasso_model$lambda.min
+ridge_lambda <- ridge_model$lambda.min
+elastic_net_lambda <- elastic_net_model$lambda.min
+
+lasso_model
+ridge_model
+elastic_net_model
+
+
+
+cat("LASSO Optimal Lambda:", lasso_lambda, "\n")
+cat("Ridge Optimal Lambda:", ridge_lambda, "\n")
+cat("Elastic Net Optimal Lambda:", elastic_net_lambda, "\n")
+
+# Extract and display LASSO coefficients
+lasso_coefficients <- as.matrix(coef(lasso_model, s = "lambda.min"))
+cat("LASSO Model Coefficients:\n")
+print(lasso_coefficients)
+
+# Extract and display Ridge coefficients
+ridge_coefficients <- as.matrix(coef(ridge_model, s = "lambda.min"))
+cat("Ridge Model Coefficients:\n")
+print(ridge_coefficients)
+
+# Extract and display Elastic Net coefficients
+elastic_net_coefficients <- as.matrix(coef(elastic_net_model, s = "lambda.min"))
+cat("Elastic Net Model Coefficients:\n")
+print(elastic_net_coefficients)
+```
+
+```{r}
+# Step 4: Prepare the test dataset
+# Normalize numeric variables in test data
+test_data[numeric_cols] <- scale(test_data[numeric_cols])
+
+# Create the design matrix for the test dataset
+x_test <- model.matrix(~ . - Calories_Burned, data = test_data)[, -1]
+y_test <- test_data$Calories_Burned
+
+# Step 5: Predict and evaluate models
+# Predict and calculate MSE for LASSO
+lasso_pred <- predict(lasso_model, newx = x_test, s = "lambda.min")
+lasso_mse <- mean((y_test - lasso_pred)^2)
+
+# Predict and calculate MSE for Ridge
+ridge_pred <- predict(ridge_model, newx = x_test, s = "lambda.min")
+ridge_mse <- mean((y_test - ridge_pred)^2)
+
+# Predict and calculate MSE for Elastic Net
+elastic_net_pred <- predict(elastic_net_model, newx = x_test, s = "lambda.min")
+elastic_net_mse <- mean((y_test - elastic_net_pred)^2)
+
+# Print test MSE for each model
+cat("LASSO Test MSE:", lasso_mse, "\n")
+cat("Ridge Test MSE:", ridge_mse, "\n")
+cat("Elastic Net Test MSE:", elastic_net_mse, "\n")
+
+```
